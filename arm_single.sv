@@ -294,6 +294,7 @@ module datapath(input  logic        clk, reset,
   logic [31:0] PCNext, PCPlus4, PCPlus8;
   logic [31:0] ExtImm, SrcA, SrcB, Result, movSrcAresult;
   logic [3:0]  RA1, RA2;
+  logic [31:0] ShiftResult;
 
   // next PC logic
   mux2 #(32)  pcmux(PCPlus4, Result, PCSrc, PCNext);
@@ -311,8 +312,11 @@ module datapath(input  logic        clk, reset,
   mux2 #(32) movSrcAmux(SrcA, 32'b0, MOVFlag, movSrcAresult); // Escolhe Src ou 0 a partir de MOVFlag
   extend      ext(Instr[23:0], ImmSrc, ExtImm);
 
+  // calculo do shift
+  shifter shift(Instr[11:7], Instr[6:5], WriteData, ShiftResult);
+
   // ALU logic
-  mux2 #(32)  srcbmux(WriteData, ExtImm, ALUSrc, SrcB);
+  mux2 #(32)  srcbmux(ShiftResult, ExtImm, ALUSrc, SrcB);
   alu         alu(movSrcAresult, SrcB, ALUControl, 
                   ALUResult, ALUFlags);
 endmodule
@@ -416,6 +420,25 @@ module alu(input  logic [31:0] a, b,
                     ~(a[31] ^ b[31] ^ ALUControl[0]) & 
                     (a[31] ^ sum[31]); 
   assign ALUFlags    = {neg, zero, carry, overflow};
+
+// Modulo para funcoes shift
+module shifter(input logic [4:0] shamt5,
+               input logic [1:0] sh,
+               input logic [31:0] Rm,
+               output logic [31:0] Rmshifted);
+
+  logic [31:0] shamt32;
+  
+  assign shamt32 = {27'b0, shamt5};
+
+  always_comb
+    casex (sh[1:0]) // tipo de shift
+      2'b00: Rmshifted = Rm << shamt32;
+      2'b01: Rmshifted = Rmshifted;
+      2'b10: Rmshifted = Rmshifted;
+      2'b11: Rmshifted = Rmshifted;
+    endcase
+
 endmodule
 
 
