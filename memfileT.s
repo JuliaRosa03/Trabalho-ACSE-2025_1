@@ -1,0 +1,10 @@
+MOV R0, #0
+MOV R1, #0xa
+STR R1, [R0, #160]
+ADD R2, R0, #2
+STR R2, [R0, #164]
+CHECK LDR R3, [R0, #164]
+CMP R3, #9
+BNE CHECK
+MOV R4, #1
+MOV R4, #1
