@@ -428,14 +428,17 @@ module shifter(input logic [4:0] shamt5,
                output logic [31:0] Rmshifted);
 
   logic [31:0] shamt32;
+  logic signed [31:0] RmSigned;
+
+  assign RmSigned = Rm;
   
   assign shamt32 = {27'b0, shamt5};
 
   always_comb
     casex (sh[1:0]) // tipo de shift
-      2'b00: Rmshifted = Rm << shamt32;
-      2'b01: Rmshifted = Rmshifted;
-      2'b10: Rmshifted = Rmshifted;
+      2'b00: Rmshifted = Rm << shamt32;  //LSL
+      2'b01: Rmshifted = Rm >> shamt32; //LSR
+      2'b10: Rmshifted = RmSigned >>> shamt32; //ASR
       2'b11: Rmshifted = Rmshifted;
     endcase
 
