@@ -1,78 +1,3 @@
-// arm_single.sv
-// David_Harris@hmc.edu and Sarah_Harris@hmc.edu 25 June 2013
-// Single-cycle implementation of a subset of ARMv4
-// 
-// run 210
-// Expect simulator to print "Simulation succeeded"
-// when the value 7 is written to address 100 (0x64)
-
-// 16 32-bit registers
-// Data-processing instructions
-//   ADD, SUB, AND, ORR
-//   INSTR<cond><S> rd, rn, #immediate
-//   INSTR<cond><S> rd, rn, rm
-//    rd <- rn INSTR rm	      if (S) Update Status Flags
-//    rd <- rn INSTR immediate	if (S) Update Status Flags
-//   Instr[31:28] = cond
-//   Instr[27:26] = op = 00
-//   Instr[25:20] = funct
-//                  [25]:    1 for immediate, 0 for register
-//                  [24:21]: 0100 (ADD) / 0010 (SUB) /
-//                           0000 (AND) / 1100 (ORR)
-//                  [20]:    S (1 = update CPSR status Flags)
-//   Instr[19:16] = rn
-//   Instr[15:12] = rd
-//   Instr[11:8]  = 0000
-//   Instr[7:0]   = imm8      (for #immediate type) / 
-//                  {0000,rm} (for register type)
-//   
-// Load/Store instructions
-//   LDR, STR
-//   INSTR rd, [rn, #offset]
-//    LDR: rd <- Mem[rn+offset]
-//    STR: Mem[rn+offset] <- rd
-//   Instr[31:28] = cond
-//   Instr[27:26] = op = 01 
-//   Instr[25:20] = funct
-//                  [25]:    0 (A)
-//                  [24:21]: 1100 (P/U/B/W)
-//                  [20]:    L (1 for LDR, 0 for STR)
-//   Instr[19:16] = rn
-//   Instr[15:12] = rd
-//   Instr[11:0]  = imm12 (zero extended)
-//
-// Branch instruction (PC <= PC + offset, PC holds 8 bytes past Branch Instr)
-//   B
-//   B target
-//    PC <- PC + 8 + imm24 << 2
-//   Instr[31:28] = cond
-//   Instr[27:25] = op = 10
-//   Instr[25:24] = funct
-//                  [25]: 1 (Branch)
-//                  [24]: 0 (link)
-//   Instr[23:0]  = imm24 (sign extend, shift left 2)
-//   Note: no Branch delay slot on ARM
-//
-// Other:
-//   R15 reads as PC+8
-//   Conditional Encoding
-//    cond  Meaning                       Flag
-//    0000  Equal                         Z = 1
-//    0001  Not Equal                     Z = 0
-//    0010  Carry Set                     C = 1
-//    0011  Carry Clear                   C = 0
-//    0100  Minus                         N = 1
-//    0101  Plus                          N = 0
-//    0110  Overflow                      V = 1
-//    0111  No Overflow                   V = 0
-//    1000  Unsigned Higher               C = 1 & Z = 0
-//    1001  Unsigned Lower/Same           C = 0 | Z = 1
-//    1010  Signed greater/equal          N = V
-//    1011  Signed less                   N != V
-//    1100  Signed greater                N = V & Z = 0
-//    1101  Signed less/equal             N != V | Z = 1
-//    1110  Always                        any
-
 module testbench();
 
   logic        clk;
@@ -157,7 +82,8 @@ module arm(input  logic        clk, reset,
   logic [3:0] ALUFlags;
   logic       RegWrite, 
               ALUSrc, MemtoReg, PCSrc;
-  logic [1:0] RegSrc, ImmSrc, ALUControl;
+  logic [1:0] RegSrc, ImmSrc;
+  logic [2:0] ALUControl;
 
   controller c(clk, reset, Instr[31:12], ALUFlags, 
                RegSrc, RegWrite, ImmSrc, 
@@ -178,7 +104,7 @@ module controller(input  logic         clk, reset,
                   output logic         RegWrite,
                   output logic [1:0]   ImmSrc,
                   output logic         ALUSrc, 
-                  output logic [1:0]   ALUControl,
+                  output logic [2:0]   ALUControl,
                   output logic         MemWrite, MemtoReg,
                   output logic         PCSrc);
 
@@ -199,7 +125,8 @@ module decoder(input  logic [1:0] Op,
                output logic [1:0] FlagW,
                output logic       PCS, RegW, MemW,
                output logic       MemtoReg, ALUSrc,
-               output logic [1:0] ImmSrc, RegSrc, ALUControl);
+               output logic [1:0] ImmSrc, RegSrc,
+               output logic [2:0] ALUControl);
 
   logic [9:0] controls;
   logic       Branch, ALUOp;
@@ -229,21 +156,21 @@ module decoder(input  logic [1:0] Op,
   always_comb
     if (ALUOp) begin                 // which DP Instr?
       case(Funct[4:1]) 
-  	    4'b0100: ALUControl = 2'b00; // ADD
-  	    4'b0010: ALUControl = 2'b01; // SUB
-          4'b0000: ALUControl = 2'b10; // AND
-  	    4'b1100: ALUControl = 2'b11; // ORR
-  	    default: ALUControl = 2'bx;  // unimplemented
+  	    4'b0100: ALUControl = 3'b000; // ADD
+  	    4'b0010: ALUControl = 3'b001; // SUB
+          4'b0000: ALUControl = 3'b010; // AND
+  	    4'b1100: ALUControl = 3'b011; // ORR
+  	    default: ALUControl = 3'bx;  // unimplemented
       endcase
       // update flags if S bit is set 
 	// (C & V only updated for arith instructions)
       FlagW[1]      = Funct[0]; // FlagW[1] = S-bit
 	// FlagW[0] = S-bit & (ADD | SUB)
       FlagW[0]      = Funct[0] & 
-        (ALUControl == 2'b00 | ALUControl == 2'b01); 
+        (ALUControl == 3'b000 | ALUControl == 3'b001); 
     end else begin
-      ALUControl = 2'b00; // add for non-DP instructions
-      FlagW      = 2'b00; // don't update Flags
+      ALUControl = 3'b000; // add for non-DP instructions
+      FlagW      = 3'b000; // don't update Flags
     end
               
   // PC Logic
@@ -309,7 +236,7 @@ module datapath(input  logic        clk, reset,
                 input  logic        RegWrite,
                 input  logic [1:0]  ImmSrc,
                 input  logic        ALUSrc,
-                input  logic [1:0]  ALUControl,
+                input  logic [2:0]  ALUControl,
                 input  logic        MemtoReg,
                 input  logic        PCSrc,
                 output logic [3:0]  ALUFlags,
@@ -416,7 +343,7 @@ endmodule
 
 
 module alu(input  logic [31:0] a, b,
-           input  logic [1:0]  ALUControl,
+           input  logic [2:0]  ALUControl,
            output logic [31:0] Result,
            output logic [3:0]  ALUFlags);
 
@@ -428,10 +355,11 @@ module alu(input  logic [31:0] a, b,
   assign sum = a + condinvb + ALUControl[0];
 
   always_comb
-    casex (ALUControl[1:0])
-      2'b0?: Result = sum;
-      2'b10: Result = a & b;
-      2'b11: Result = a | b;
+    casex (ALUControl[2:0])
+      3'b00?: Result = sum;
+      3'b010: Result = a & b;
+      3'b011: Result = a | b;
+      3'b100: Result = a ^ b; //XOR
     endcase
 
   assign neg      = Result[31];
