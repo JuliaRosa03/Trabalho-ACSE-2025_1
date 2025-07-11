@@ -81,18 +81,18 @@ module arm(input  logic        clk, reset,
 
   logic [3:0] ALUFlags;
   logic       RegWrite, 
-              ALUSrc, MemtoReg, PCSrc, MOVFlag;
+              ALUSrc, MemtoReg, PCSrc, MOVFlag, BLFlag;
   logic [1:0] RegSrc, ImmSrc;
   logic [2:0] ALUControl;
 
   controller c(clk, reset, Instr[31:12], ALUFlags, 
                RegSrc, RegWrite, ImmSrc, 
                ALUSrc, ALUControl,
-               MemWrite, MemtoReg, PCSrc, MOVFlag);
+               MemWrite, MemtoReg, PCSrc, MOVFlag, BLFlag);
   datapath dp(clk, reset, 
               RegSrc, RegWrite, ImmSrc,
               ALUSrc, ALUControl,
-              MemtoReg, PCSrc, MOVFlag
+              MemtoReg, PCSrc, MOVFlag, BLFlag,
               ALUFlags, PC, Instr,
               ALUResult, WriteData, ReadData);
 endmodule
@@ -107,14 +107,14 @@ module controller(input  logic         clk, reset,
                   output logic [2:0]   ALUControl,
                   output logic         MemWrite, MemtoReg,
                   output logic         PCSrc,
-                  output logic         MOVFlag);
+                  output logic         MOVFlag, BLFlag);
 
   logic [1:0] FlagW;
   logic       PCS, RegW, MemW, NoWrite;
   
   decoder dec(Instr[27:26], Instr[25:20], Instr[15:12],
               FlagW, PCS, RegW, MemW,
-              MemtoReg, ALUSrc, MOVFlag, NoWrite, ImmSrc, RegSrc, ALUControl);
+              MemtoReg, ALUSrc, MOVFlag, BLFlag, NoWrite, ImmSrc, RegSrc, ALUControl);
   condlogic cl(clk, reset, Instr[31:28], ALUFlags,
                FlagW, PCS, RegW, MemW, NoWrite,
                PCSrc, RegWrite, MemWrite);
@@ -125,7 +125,7 @@ module decoder(input  logic [1:0] Op,
                input  logic [3:0] Rd,
                output logic [1:0] FlagW,
                output logic       PCS, RegW, MemW,
-               output logic       MemtoReg, ALUSrc,NoWrite, MOVFlag,
+               output logic       MemtoReg, ALUSrc,NoWrite, MOVFlag, BLFlag,
                output logic [1:0] ImmSrc, RegSrc,
                output logic [2:0] ALUControl);
 
@@ -139,19 +139,36 @@ module decoder(input  logic [1:0] Op,
   	                        // Data processing immediate
   	  2'b00: if (Funct[5])  begin 
             controls = 10'b0000101001;
+            BLFlag = 1'b0;
           end 
   	                        // Data processing register
   	         else begin           
-              controls = 10'b0000001001; 
+              controls = 10'b0000001001;
+              BLFlag = 1'b0; 
           end
   	                        // LDR
-  	  2'b01: if (Funct[0]) begin controls = 10'b0001111000; 
+  	  2'b01: if (Funct[0]) begin 
+              controls = 10'b0001111000; 
+              BLFlag = 1'b0;
   	                        // STR
-  	         else           controls = 10'b1001110100; 
+  	         else begin         
+              controls = 10'b1001110100; 
+              BLFlag = 1'b0;
+          end
   	                        // B
-  	  2'b10:                controls = 10'b0110100010; 
+  	  2'b10: if (Funct[5:4] === 2'b00) begin               
+              controls = 10'b0110100010; 
+              BLFlag = 1'b0;
+          end
+          else begin
+              controls = 10'b0110101010; 
+              BLFlag = 1'b1;
+          end
   	                        // Unimplemented
-  	  default:              controls = 10'bx;          
+  	  default: begin             
+              controls = 10'bx;  
+              BLFlag = 1'b0;  
+      end      
   	endcase
 
   assign {RegSrc, ImmSrc, ALUSrc, MemtoReg, 
@@ -284,7 +301,7 @@ module datapath(input  logic        clk, reset,
                 input  logic [2:0]  ALUControl,
                 input  logic        MemtoReg,
                 input  logic        PCSrc,
-                input  logic        MOVFlag,
+                input  logic        MOVFlag, BLFlag
                 output logic [3:0]  ALUFlags,
                 output logic [31:0] PC,
                 input  logic [31:0] Instr,
@@ -295,6 +312,8 @@ module datapath(input  logic        clk, reset,
   logic [31:0] ExtImm, SrcA, SrcB, Result, movSrcAresult;
   logic [3:0]  RA1, RA2;
   logic [31:0] ShiftResult;
+  logic [3:0] a3result;
+  logic [31:0] wd3result;
 
   // next PC logic
   mux2 #(32)  pcmux(PCPlus4, Result, PCSrc, PCNext);
@@ -305,8 +324,12 @@ module datapath(input  logic        clk, reset,
   // register file logic
   mux2 #(4)   ra1mux(Instr[19:16], 4'b1111, RegSrc[0], RA1);
   mux2 #(4)   ra2mux(Instr[3:0], Instr[15:12], RegSrc[1], RA2);
+
+  mux2 #(4)   a3mux(Instr[15:12], 4'b1110, BranchLFlag, a3result); // if instruction is BL, it sends '14 (LR)' to A3
+  mux2 #(32)  wd3mux(Result, PCPlus4, BranchLFlag, wd3result);  // if instruction is BL, it sends 'PC + 4' to WD3
+
   regfile     rf(clk, RegWrite, RA1, RA2,
-                 Instr[15:12], Result, PCPlus8, 
+                 a3result, wd3result, PCPlus8, 
                  SrcA, WriteData); 
   mux2 #(32)  resmux(ALUResult, ReadData, MemtoReg, Result);
   mux2 #(32) movSrcAmux(SrcA, 32'b0, MOVFlag, movSrcAresult); // Escolhe Src ou 0 a partir de MOVFlag
